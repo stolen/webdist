@@ -1,4 +1,6 @@
 /deps
 /ebin
-/.erlang.mk
+/.erlang.mk*
+/*.d
 .*.sw?
+erl_crash.dump
