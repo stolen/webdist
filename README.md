@@ -37,11 +37,18 @@ make
 ERL_LIBS=deps erl -pa ebin -s webdist_server
 ```
 
+Starting self-hosted http-epmd (accepts connections to itself without proxying)
+-------
+```shell
+ERL_LIBS=deps erl -pa ebin -epmd_module webdist_epmd -webdist mode router -sname world -setcookie coocoo -s webdist_server -proto_dist inet6_tcp
+```
+(Here we start our own epmd in router mode, start server to accept sockets, use inet6_tcp as further dist proto)
+
 Connecting to other nodes
 ------
 ```shell
 make
-ERL_LIBS=deps erl -pa ebin -proto_dist webdist inet6_tcp -sname hello -setcookie coocoo
+ERL_LIBS=deps erl -pa ebin -proto_dist webdist -sname hello -setcookie coocoo
 ```
 ```erlang
 (hello@stolen)1> net_adm:ping(world@stolen).
