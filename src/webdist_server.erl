@@ -39,10 +39,12 @@ upgrade(Req0, _Env, ?MODULE, node) ->
     Host = binary_to_list(HostBin),
     {Name, Req2} = cowboy_req:binding(name, Req1),
     % Discover target node port
-    case erl_epmd:port_please(binary_to_list(Name), Host) of
+    case webdist_epmd:port_please(binary_to_list(Name), Host) of
         {port, Port, Version} ->
             {ok, ErlSocket} = gen_tcp:connect(Host, Port, [{packet, raw}, binary, {active, once}, {nodelay, true}]),
             confirm_and_loop(Req2, Version, ErlSocket);
+	{self, Version} ->
+	    confirm_and_accept(Req2, Version);
         noport ->
             {ok, Req3} = cowboy_req:reply(404, [], <<>>, Req2),
             {halt, Req3};
@@ -80,3 +82,13 @@ proxy_loop(TransportA, SockA, SockB) ->
             error({unexpected_message, Other})
     end.
 
+
+confirm_and_accept(Req2, Version) ->
+    % Confirm upgrade
+    {ok, _Req3} = cowboy_req:upgrade_reply(101, [{<<"upgrade">>, <<"erlang-distribution">>}, {<<"version">>, integer_to_binary(Version)}], Req2),
+    % Ensure upgrade is sent and do accept expected message
+    receive {cowboy_req, resp_sent} -> ok after 1000 -> erlang:error(no_response_ack) end,
+    % Downgrade to low-level
+    [Socket] = cowboy_req:get([socket], Req2),
+    webdist_dist:perform_accept(Socket),
+    exit({shutdown, passed_to_dist}).

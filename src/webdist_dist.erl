@@ -9,6 +9,8 @@
 -export([listen/1, accept/1, close/1, select/1, setup/5]).% , accept_connection/5,
          %setup/5, is_node_name/1]).
 
+-export([perform_accept/1]).
+
 -export([accept_loop/2, do_setup/6, tick/1]).
 -export([setopts_pre_nodeup/1, setopts_post_nodeup/1]).
 
@@ -30,7 +32,7 @@ get_tcp_address(Socket) ->
                   address = Address,
                   host = Host,
                   protocol = tcp,
-                  family = inet6
+                  family = family(Socket)
                  }.
 
 accept(Listen) ->
@@ -46,6 +48,39 @@ accept_loop(Kernel, Listen) ->
             exit(Error)
     end.
 
+perform_accept(Socket) when is_port(Socket) ->
+    Kernel = whereis(net_kernel),
+    perform_accept(Kernel, Socket).
+
+perform_accept(Kernel, Socket) when is_pid(Kernel), is_port(Socket) ->
+    Family = family(Socket),
+    ok = inet:setopts(Socket, [{packet, 2}, {mode, list}, {active, false}, {nodelay, true}]),
+    Kernel ! {accept,self(),Socket,Family,tcp},
+    _ = controller(Kernel, Socket),
+    ok.
+
+controller(Kernel, Socket) ->
+    receive
+	{Kernel, controller, Pid} ->
+	    flush_controller(Pid, Socket),
+	    inet_tcp:controlling_process(Socket, Pid),
+	    flush_controller(Pid, Socket),
+	    Pid ! {self(), controller};
+	{Kernel, unsupported_protocol} ->
+	    exit(unsupported_protocol)
+    end.
+
+flush_controller(Pid, Socket) ->
+    receive
+	{tcp, Socket, Data} ->
+	    Pid ! {tcp, Socket, Data},
+	    flush_controller(Pid, Socket);
+	{tcp_closed, Socket} ->
+	    Pid ! {tcp_closed, Socket},
+	    flush_controller(Pid, Socket)
+    after 0 ->
+	    ok
+    end.
 
 close(Socket) ->
     inet6_tcp:close(Socket).
@@ -124,7 +159,13 @@ make_netaddr(Address, Socket) ->
         family = family(Ip)}.
 
 family({_,_,_,_}) -> inet;
-family({_,_,_,_,_,_,_,_}) -> inet6.
+family({_,_,_,_,_,_,_,_}) -> inet6;
+family(Socket) when is_port(Socket) ->
+    case erlang:port_get_data(Socket) of
+	inet_tcp -> inet;
+	inet6_tcp -> inet6
+    end.
+
 
 make_hsdata(Kernel, Node, Type, MyNode, Socket, NetAddr, Version, Timer) ->
     #hs_data{
